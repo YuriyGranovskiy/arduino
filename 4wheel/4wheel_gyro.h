@@ -1,5 +1,5 @@
 const int MPU_addr = 0x68;
-const long AngleDevider = 70000;
+const long AngleDevider = 69000; // should be 131 but it's not - default 70000
 
 float Angle = 0;
 int16_t AcX, AcY, AcZ, Tmp, GyX, GyY, GyZ;
@@ -24,7 +24,7 @@ void gyro_delay(int msDelay){
   unsigned long endTime = micros() + long(msDelay)*1000;
   double gyroZDiff = 0;
   do{
-    gyroZDiff += (double)(getGyroZ() - gyroZCompensation) / (double)AngleDevider; // should be 131 but it's not // 73800
+    gyroZDiff += (double)(getGyroZ() - gyroZCompensation) / (double)AngleDevider;
     delayMicroseconds(5);
   } while (micros() < endTime);
   Angle += ((float)(gyroZDiff));    

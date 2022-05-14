@@ -1,11 +1,11 @@
-#include <IRremote.h>
+#include <IRremote.hpp>
 #include <Wire.h>
 #include "4wheel_drive.h"
 #include "4wheel_gyro.h"
 
-const int IR_RECV_PIN = 8;
+const int IR_RECV_PIN = 11;
 
-int RobotMode = 2; // 0 - direct, 1 - obstacle, 2 - program
+int RobotMode = 0; // 0 - direct, 1 - obstacle, 2 - program
 
 // Numbers - 45,46,47,44,40,43,7,15,9
 // # - D
@@ -16,22 +16,25 @@ int RobotMode = 2; // 0 - direct, 1 - obstacle, 2 - program
 #define LEFT 0x08
 #define RIGHT 0x5A
 #define STAR 0x16
+#define BUTTON_1 0x45
+#define BUTTON_2 0x46
+#define BUTTON_3 0x47
+
 
 #define DIRECT_MODE 0
 #define OBSTACLE_MODE 1
-#define PROGRAMMING_MODE 2
+#define ROUTE_MODE 2
 
 int remoteValue = STAR;
 
-IRrecv irrecv(IR_RECV_PIN);
-
 void setup() {
+  Serial.begin(9600);
   Wire.begin();
   Wire.beginTransmission(MPU_addr);
   Wire.write(0x6B);
   Wire.write(0);
   Wire.endTransmission(true);
-  Serial.begin(9600);
+
   pinMode(RIGHT_WHEELS_1_PIN, OUTPUT);
   pinMode(RIGHT_WHEELS_2_PIN, OUTPUT);
   pinMode(LEFT_WHEELS_1_PIN, OUTPUT);
@@ -39,17 +42,36 @@ void setup() {
   pinMode(OBSTACLE_FRONT_PIN, INPUT);
   pinMode(OBSTACLE_LEFT_PIN, INPUT);
   pinMode(OBSTACLE_RIGHT_PIN, INPUT);
-  irrecv.enableIRIn();
+  IrReceiver.begin(IR_RECV_PIN, ENABLE_LED_FEEDBACK);
 }
 
-void loop() {  
-  if (irrecv.decode()) {
-    remoteValue = irrecv.decodedIRData.command;
-    if (remoteValue == OK_BUTTON) {
-      stopMoving();
-      RobotMode = (RobotMode + 1) % 3;
-      Serial.println(RobotMode);
-    }
+void loop() {
+  bool decoded;
+  if (IrReceiver.decode()) {
+    decoded = true;
+    remoteValue = IrReceiver.decodedIRData.command;
+    switch(remoteValue) {
+      case OK_BUTTON: {
+        stopMoving();
+        RobotMode = (RobotMode + 1) % 3;
+        break;
+      }
+      case BUTTON_1: {
+        stopMoving();
+        RobotMode = DIRECT_MODE;
+        break;
+      }
+      case BUTTON_2: {
+        stopMoving();
+        RobotMode = OBSTACLE_MODE;
+        break;
+      }
+      case BUTTON_3: {
+        stopMoving();
+        RobotMode = ROUTE_MODE;
+        break;
+      }
+    }    
   }
 
   switch (RobotMode) {
@@ -59,13 +81,30 @@ void loop() {
     case OBSTACLE_MODE:
       movingWithObstacle();
       break;
-    case PROGRAMMING_MODE:
-      movingByProgram();
+    case ROUTE_MODE:
+      movingByRoute();
+      RobotMode = DIRECT_MODE;
       break;
   }
 
-  Serial.println(remoteValue, HEX);
-  irrecv.resume();
+  if(decoded) {
+    IrReceiver.resume();
+  }
+  gyro_delay(100);
+}
+
+
+void movingByRoute() {
+  stepsForward(5);
+  turnLeft90();
+  stepsForward(2);
+  turnLeft90();
+  stepsForward(4);
+  turnLeft90();
+  stepsForward(2);
+  turnRight90();
+  stepForward();
+  turnRight180();
 }
 
 void turnAngle(float angle) {
@@ -90,34 +129,9 @@ void turnAngle(float angle) {
   }
 }
 
-void movingByProgram() {
-  stepsForward(5);
-  turnLeft90();
-  stepsForward(2);
-  turnLeft90();
-  stepsForward(4);
-  turnLeft90();
-  stepsForward(2);
-  turnRight90();
-  stepForward();
-  turnRight90();
-  turnRight90();
-  
-  /*turnLeft90();
-  turnLeft90();
-  turnLeft90();
-  turnLeft90();
-  gyro_delay(1000);
-  turnRight90();
-  turnRight90();
-  turnRight90();
-  turnRight90();
-  gyro_delay(1000);*/
-}
-
 void stepForward() {
   moveDuringTime(2300);
-  gyro_delay(1000);  
+  gyro_delay(500);  
 }
 
 void stepsForward(int steps) {
@@ -128,12 +142,22 @@ void stepsForward(int steps) {
 
 void turnLeft90() {
   turnAngle(90);
-  gyro_delay(1000);
+  gyro_delay(500);
+}
+
+void turnLeft1800() {
+  turnAngle(180);
+  gyro_delay(500);
 }
 
 void turnRight90() {
   turnAngle(-90);
-  gyro_delay(1000);
+  gyro_delay(500);
+}
+
+void turnRight180() {
+  turnAngle(-180);
+  gyro_delay(500);
 }
 
 void moveDuringTime(int timeToMove) {
@@ -142,6 +166,15 @@ void moveDuringTime(int timeToMove) {
   gyro_delay(1);
   float startAngle = Angle;
   do {
+    int canMoveFront = digitalRead(OBSTACLE_FRONT_PIN);
+    int canMoveRight = digitalRead(OBSTACLE_RIGHT_PIN);
+    int canMoveLeft = digitalRead(OBSTACLE_LEFT_PIN);
+
+    if(canMoveFront == 0 || canMoveRight == 0 || canMoveLeft == 0) {
+      RobotMode = DIRECT_MODE;
+      return;
+    }
+
     if (Angle > startAngle + 1) {
       tangleRightWhileMoving();
     } else if (Angle < startAngle - 1) {
