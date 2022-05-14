@@ -1,18 +1,11 @@
 #include <IRremote.h>
+#include <Wire.h>
+#include "4wheel_drive.h"
+#include "4wheel_gyro.h"
 
-int RIGHT_WHEELS_1_PIN = 5;
-int RIGHT_WHEELS_2_PIN = 6;
-int LEFT_WHEELS_1_PIN = 9;
-int LEFT_WHEELS_2_PIN = 10;
+const int IR_RECV_PIN = 8;
 
-int OBSTACLE_FRONT_PIN = 12;
-int OBSTACLE_RIGHT_PIN = 2;
-int OBSTACLE_LEFT_PIN = 7;
-
-int IR_RECV_PIN = 8;
-
-int robotMode = 0; // 0 - direct, 1 - obstacle, 2 - program
-bool isMoving = 0;
+int RobotMode = 2; // 0 - direct, 1 - obstacle, 2 - program
 
 // Numbers - 45,46,47,44,40,43,7,15,9
 // # - D
@@ -33,6 +26,11 @@ int remoteValue = STAR;
 IRrecv irrecv(IR_RECV_PIN);
 
 void setup() {
+  Wire.begin();
+  Wire.beginTransmission(MPU_addr);
+  Wire.write(0x6B);
+  Wire.write(0);
+  Wire.endTransmission(true);
   Serial.begin(9600);
   pinMode(RIGHT_WHEELS_1_PIN, OUTPUT);
   pinMode(RIGHT_WHEELS_2_PIN, OUTPUT);
@@ -44,17 +42,17 @@ void setup() {
   irrecv.enableIRIn();
 }
 
-void loop() {
+void loop() {  
   if (irrecv.decode()) {
     remoteValue = irrecv.decodedIRData.command;
     if (remoteValue == OK_BUTTON) {
       stopMoving();
-      robotMode = (robotMode + 1) % 3;
-      Serial.println(robotMode);
+      RobotMode = (RobotMode + 1) % 3;
+      Serial.println(RobotMode);
     }
   }
 
-  switch (robotMode) {
+  switch (RobotMode) {
     case DIRECT_MODE:
       movingByRemote(remoteValue);
       break;
@@ -68,20 +66,101 @@ void loop() {
 
   Serial.println(remoteValue, HEX);
   irrecv.resume();
+}
 
-  delay(200);
+void turnAngle(float angle) {
+  gyro_delay(1);
+  float angleStart = Angle;
+  float angleEnd = angleStart + angle;
+  do {
+    if (angleEnd > angleStart) {
+      turnLeft();
+      gyro_delay(5);
+      stopMoving();
+    }
+    else {
+      turnRight();
+      gyro_delay(5);
+      stopMoving();
+    }    
+  } while (abs(angleEnd-Angle) > 1);
+
+  if(abs(angleEnd-Angle) > 1) {
+    turnAngle(Angle-angleEnd);
+  }
 }
 
 void movingByProgram() {
+  stepsForward(5);
+  turnLeft90();
+  stepsForward(2);
+  turnLeft90();
+  stepsForward(4);
+  turnLeft90();
+  stepsForward(2);
+  turnRight90();
+  stepForward();
+  turnRight90();
+  turnRight90();
+  
+  /*turnLeft90();
+  turnLeft90();
+  turnLeft90();
+  turnLeft90();
+  gyro_delay(1000);
+  turnRight90();
+  turnRight90();
+  turnRight90();
+  turnRight90();
+  gyro_delay(1000);*/
+}
 
+void stepForward() {
+  moveDuringTime(2300);
+  gyro_delay(1000);  
+}
+
+void stepsForward(int steps) {
+  for(int i = 0; i < steps; i++) {
+    stepForward();
+  }
+}
+
+void turnLeft90() {
+  turnAngle(90);
+  gyro_delay(1000);
+}
+
+void turnRight90() {
+  turnAngle(-90);
+  gyro_delay(1000);
+}
+
+void moveDuringTime(int timeToMove) {
+  unsigned long startTime = micros();
+  unsigned long endTime = startTime + (long)timeToMove * 1000;
+  gyro_delay(1);
+  float startAngle = Angle;
+  do {
+    if (Angle > startAngle + 1) {
+      tangleRightWhileMoving();
+    } else if (Angle < startAngle - 1) {
+      tangleLeftWhileMoving();
+    } else {
+      moveForward();
+    }
+    
+    gyro_delay(5);
+    stopMoving();  
+  } while (micros() < endTime);
+  stopMoving();
 }
 
 void movingByRemote(int remoteValue) {
   int canMoveFront = digitalRead(OBSTACLE_FRONT_PIN);
   int canMoveRight = digitalRead(OBSTACLE_RIGHT_PIN);
   int canMoveLeft = digitalRead(OBSTACLE_LEFT_PIN);
-  Serial.println(canMoveFront);
-    
+  
   switch (remoteValue) {
     case FORWARD:
       if (canMoveFront == 1) {
@@ -94,19 +173,19 @@ void movingByRemote(int remoteValue) {
       moveBackward();
       break;
     case LEFT:
-      if(isMoving = 1) {
-        if(canMoveFront == 1 && canMoveLeft == 1) {        
-          turnLeftWhileMoving();          
+      if (IsMoving = 1) {
+        if (canMoveFront == 1 && canMoveLeft == 1) {
+          turnLeftWhileMoving();
         } else {
           stopMoving();
-        }        
-      } else {        
+        }
+      } else {
         turnLeft();
       }
       break;
     case RIGHT:
-      if(isMoving) {
-        if(canMoveFront == 1 && canMoveRight == 1) {
+      if (IsMoving) {
+        if (canMoveFront == 1 && canMoveRight == 1) {
           turnRightWhileMoving();
         }
         else {
@@ -138,57 +217,4 @@ void movingWithObstacle() {
 
     delay(100);
   }
-}
-
-void moveForward() {
-  isMoving = 1;
-  analogWrite(RIGHT_WHEELS_1_PIN, 80);
-  digitalWrite(RIGHT_WHEELS_2_PIN, LOW);
-  analogWrite(LEFT_WHEELS_1_PIN, 80);
-  digitalWrite(LEFT_WHEELS_2_PIN, LOW);
-}
-
-void moveBackward() {
-  isMoving = 1;
-  digitalWrite(RIGHT_WHEELS_1_PIN, LOW);
-  analogWrite(RIGHT_WHEELS_2_PIN, 80);
-  digitalWrite(LEFT_WHEELS_1_PIN, LOW);
-  analogWrite(LEFT_WHEELS_2_PIN, 80);
-}
-
-void turnRight() {
-  digitalWrite(RIGHT_WHEELS_1_PIN, LOW);
-  analogWrite(RIGHT_WHEELS_2_PIN, 80);
-  analogWrite(LEFT_WHEELS_1_PIN, 80);
-  digitalWrite(LEFT_WHEELS_2_PIN, LOW);
-}
-
-void turnLeft() {
-  analogWrite(RIGHT_WHEELS_1_PIN, 80);
-  digitalWrite(RIGHT_WHEELS_2_PIN, LOW);
-  digitalWrite(LEFT_WHEELS_1_PIN, LOW);
-  analogWrite(LEFT_WHEELS_2_PIN, 80);
-}
-
-void turnLeftWhileMoving() {
-  analogWrite(RIGHT_WHEELS_1_PIN, 100);
-  digitalWrite(RIGHT_WHEELS_2_PIN, LOW);
-  analogWrite(LEFT_WHEELS_1_PIN, 50);
-  digitalWrite(LEFT_WHEELS_2_PIN, LOW);
-}
-
-
-void turnRightWhileMoving() {
-  analogWrite(RIGHT_WHEELS_1_PIN, 50);
-  digitalWrite(RIGHT_WHEELS_2_PIN, LOW);
-  analogWrite(LEFT_WHEELS_1_PIN, 100);
-  digitalWrite(LEFT_WHEELS_2_PIN, LOW);
-}
-
-void stopMoving() {
-  isMoving = 0;
-  digitalWrite(RIGHT_WHEELS_1_PIN, LOW);
-  digitalWrite(RIGHT_WHEELS_2_PIN, LOW);
-  digitalWrite(LEFT_WHEELS_1_PIN, LOW);
-  digitalWrite(LEFT_WHEELS_2_PIN, LOW);
 }
